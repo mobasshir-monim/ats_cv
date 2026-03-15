@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { UploadCloud, CheckCircle2, AlertCircle, CreditCard } from 'lucide-react';
+import { UploadCloud, CheckCircle2, AlertCircle, CreditCard, Copy, Check } from 'lucide-react';
 
 export default function UserPortal() {
   const [email, setEmail] = useState('');
@@ -9,6 +9,9 @@ export default function UserPortal() {
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const bkashNumber = '01775340641';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,6 +62,16 @@ export default function UserPortal() {
     }
   };
 
+  const handleCopyNumber = async () => {
+    try {
+      await navigator.clipboard.writeText(bkashNumber);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
   if (status === 'success') {
     return (
       <motion.div 
@@ -106,8 +119,26 @@ export default function UserPortal() {
               To use this service, please complete the payment via bKash.
             </p>
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
-              <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">bKash Personal Number</p>
-              <p className="font-mono text-lg text-slate-900">01X-XXXX-XXXX</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-2">bKash Personal Number</p>
+              <div className="flex items-center gap-2 justify-between">
+                <p className="font-mono text-lg text-slate-900">{bkashNumber}</p>
+                <button
+                  type="button"
+                  onClick={handleCopyNumber}
+                  className={`p-2 rounded-lg transition-all ${
+                    copied 
+                      ? 'bg-emerald-100 text-emerald-600' 
+                      : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                  }`}
+                  title="Copy to clipboard"
+                >
+                  {copied ? (
+                    <Check className="w-5 h-5" />
+                  ) : (
+                    <Copy className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
             </div>
             <ul className="text-sm text-slate-600 space-y-2 list-disc list-inside">
               <li>Send Money: <strong>15 BDT</strong></li>

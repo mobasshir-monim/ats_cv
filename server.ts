@@ -5,13 +5,19 @@ import { extractText } from 'unpdf';
 import Database from 'better-sqlite3';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
+import fs from 'fs';
 import 'dotenv/config';
 
 const app = express();
 const PORT = 3000;
 
-// Initialize Database
-const db = new Database('ats.db');
+// Initialize Database with dynamic path
+const DATABASE_PATH = process.env.DATABASE_PATH || 'ats.db';
+const dbDir = path.dirname(DATABASE_PATH);
+if (dbDir !== '.' && !fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+const db = new Database(DATABASE_PATH);
 
 // Create table if not exists
 db.exec(`
@@ -413,28 +419,59 @@ async function processATS(submission: any) {
 
 // Vite middleware setup
 async function startServer() {
+  console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`DATABASE_PATH: ${DATABASE_PATH}`);
+
   if (process.env.NODE_ENV !== 'production') {
+    // Development mode: Use Vite dev server
+    console.log('Starting in development mode with Vite HMR...');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    console.log('✓ Vite middleware loaded');
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Production mode: Serve built frontend from dist directory
+    console.log('Starting in production mode, serving built frontend...');
+    const distPath = path.resolve(process.cwd(), 'dist');
+    
+    if (!fs.existsSync(distPath)) {
+      console.warn(`⚠ Warning: dist directory not found at ${distPath}`);
+      console.warn('Build the frontend with: npm run build');
+    } else {
+      console.log(`✓ Serving static files from: ${distPath}`);
+    }
+    
+    // Serve static files (CSS, JS, images, etc.)
+    app.use(express.static(distPath, {
+      maxAge: '1d', // Cache static assets for 1 day
+      etag: false,
+    }));
+    
+    // SPA catch-all: Serve index.html for all non-API routes
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).json({ error: 'Frontend not built. Run: npm run build' });
+      }
     });
   }
 
-  // Global error handler
+  // Global error handler (must be last)
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('Global Error:', err);
     res.status(500).json({ error: err.message || 'Internal Server Error' });
   });
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`\n✓ Server running on http://localhost:${PORT}`);
+    console.log(`\nAvailable endpoints:`);
+    console.log(`  Frontend:       http://localhost:${PORT}`);
+    console.log(`  API:            http://localhost:${PORT}/api/*`);
+    console.log(`  Admin:          http://localhost:${PORT}`);
   });
 }
 
