@@ -216,6 +216,74 @@ export default function ResultsUI() {
             </div>
           </div>
 
+          {/* CV Section Completeness */}
+          {data.results.missingCVSections && (
+            <div className={`rounded-2xl shadow-sm border overflow-hidden ${
+              data.results.missingCVSections.length === 0 
+                ? 'bg-emerald-50 border-emerald-200' 
+                : data.results.missingCVSections.length >= 5
+                ? 'bg-red-50 border-red-200'
+                : 'bg-amber-50 border-amber-200'
+            }`}>
+              <div className={`px-6 py-5 border-b ${
+                data.results.missingCVSections.length === 0 
+                  ? 'bg-emerald-100 border-emerald-200' 
+                  : data.results.missingCVSections.length >= 5
+                  ? 'bg-red-100 border-red-200'
+                  : 'bg-amber-100 border-amber-200'
+              }`}>
+                <div className="flex items-start gap-3">
+                  {data.results.missingCVSections.length === 0 ? (
+                    <>
+                      <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <h3 className="font-semibold text-emerald-900 text-lg">CV Structure Complete</h3>
+                        <p className="text-sm text-emerald-700 mt-1">All major CV sections are present and accounted for.</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className={`w-6 h-6 ${data.results.missingCVSections.length >= 5 ? 'text-red-600' : 'text-amber-600'} shrink-0 mt-0.5`} />
+                      <div>
+                        <h3 className={`font-semibold text-lg ${data.results.missingCVSections.length >= 5 ? 'text-red-900' : 'text-amber-900'}`}>
+                          {data.results.missingCVSections.length >= 5 ? 'Missing Critical CV Sections' : 'Missing CV Sections'}
+                        </h3>
+                        <p className={`text-sm mt-1 ${data.results.missingCVSections.length >= 5 ? 'text-red-700' : 'text-amber-700'}`}>
+                          {data.results.missingCVSections.length >= 5 
+                            ? 'This document is missing too many sections to be considered a complete CV. Please add the missing sections.' 
+                            : 'Below are the sections that should be included in a professional CV:'}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+              {data.results.missingCVSections.length > 0 && (
+                <div className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {data.results.missingCVSections.map((section: string, i: number) => (
+                      <div 
+                        key={i} 
+                        className={`flex items-center gap-3 p-3 rounded-lg ${
+                          data.results.missingCVSections.length >= 5
+                            ? 'bg-red-100 border border-red-200'
+                            : 'bg-white border border-amber-100'
+                        }`}
+                      >
+                        <XCircle className={`w-5 h-5 shrink-0 ${
+                          data.results.missingCVSections.length >= 5 ? 'text-red-600' : 'text-amber-600'
+                        }`} />
+                        <span className={`font-medium ${
+                          data.results.missingCVSections.length >= 5 ? 'text-red-900' : 'text-amber-900'
+                        }`}>{section}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Suggested Jobs - Only show if present */}
           {data.results.suggestedJobs && (
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">

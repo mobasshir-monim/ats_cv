@@ -217,6 +217,18 @@ function validateATSResultShape(parsed: any) {
     }
   }
 
+  // Validate missingCVSections if present
+  if (parsed.missingCVSections) {
+    if (!Array.isArray(parsed.missingCVSections)) {
+      throw new Error('Invalid missingCVSections - must be an array');
+    }
+    for (const section of parsed.missingCVSections) {
+      if (typeof section !== 'string') {
+        throw new Error('Invalid missingCVSections item - must be string');
+      }
+    }
+  }
+
   return parsed;
 }
 
@@ -272,7 +284,8 @@ async function processATS(submission: any) {
     2. Identify 3-5 hard knockout criteria from the job circular (e.g., specific degree, mandatory skills, minimum experience).
     3. Evaluate if the candidate passes or fails each knockout criteria based strictly on the CV.
     4. Calculate an overall ATS Match Score (0-100) based on how well the CV matches the circular.
-    5. Generate section-specific "Done-For-You" rewrites. For each CV section that needs improvement, provide 1-2 rewritten bullet points that better match the job circular using strong action verbs and quantifiable metrics. Include these sections where applicable: Professional Summary, Skills, Experience, Education, Certifications.
+    5. Check if the CV contains the following standard sections: Summary/Introduction, Education, Experience, Extra Curricular Activities, Skills, Achievements, References. Identify any missing sections. If NONE of these sections are present, the CV is invalid.
+    6. Generate section-specific "Done-For-You" rewrites. For each CV section that needs improvement, provide 1-2 rewritten bullet points that better match the job circular using strong action verbs and quantifiable metrics. Include these sections where applicable: Professional Summary, Skills, Experience, Education, Certifications.
 
     Return the result strictly as a JSON object with this structure:
     {
@@ -285,6 +298,7 @@ async function processATS(submission: any) {
           "reason": "<brief reason>"
         }
       ],
+      "missingCVSections": ["<section name>", "<section name>"],
       "sectionRewrites": {
         "professionalSummary": {
           "section": "Professional Summary",
@@ -323,7 +337,8 @@ async function processATS(submission: any) {
     2. Identify 5 core strengths/skill areas from the CV (e.g., programming languages, frameworks, soft skills, certifications).
     3. Evaluate the candidate's readiness level (Junior/Mid-level/Senior) based on experience and skills. Score 0-100 representation of general "job readiness".
     4. Based on the skills and experience identified, suggest 3-5 suitable job roles/positions that would be a good fit.
-    5. Generate section-specific "Done-For-You" rewrites that enhance the CV's overall appeal. For each CV section, provide 1-2 rewritten bullet points highlighting achievements with strong action verbs and quantifiable metrics. Include these sections where applicable: Professional Summary, Skills, Experience, Education, Certifications.
+    5. Check if the CV contains the following standard sections: Summary/Introduction, Education, Experience, Extra Curricular Activities, Skills, Achievements, References. Identify any missing sections. If NONE of these sections are present, the CV is invalid.
+    6. Generate section-specific "Done-For-You" rewrites that enhance the CV's overall appeal. For each CV section, provide 1-2 rewritten bullet points highlighting achievements with strong action verbs and quantifiable metrics. Include these sections where applicable: Professional Summary, Skills, Experience, Education, Certifications.
 
     Return the result strictly as a JSON object with this structure:
     {
@@ -336,6 +351,7 @@ async function processATS(submission: any) {
           "reason": "<brief description of this strength>"
         }
       ],
+      "missingCVSections": ["<section name>", "<section name>"],
       "suggestedJobs": [
         {
           "jobTitle": "<job title>",
