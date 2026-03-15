@@ -11,7 +11,7 @@ export default function AdminDashboard() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === 'admin123') { // Simple hardcoded password for MVP
+    if (password === 'Bagu10954') { // Simple hardcoded password for MVP
       setIsAuthenticated(true);
       fetchPending();
     } else {
