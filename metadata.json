@@ -1,0 +1,5 @@
+{
+  "name": "ATS CV Analyzer",
+  "description": "A localized SaaS application that extracts text from PDFs, evaluates it against a job circular using Gemini, and provides CV rewrites. Gated by manual bKash payment.",
+  "requestFramePermissions": []
+}
