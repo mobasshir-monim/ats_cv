@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import multer from 'multer';
 import { extractText } from 'unpdf';
-import Database from 'better-sqlite3';
+import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import fs from 'fs';
@@ -11,26 +11,17 @@ import 'dotenv/config';
 const app = express();
 const PORT = 3000;
 
-// Initialize Database with dynamic path
-const DATABASE_PATH = process.env.DATABASE_PATH || 'ats.db';
-const dbDir = path.dirname(DATABASE_PATH);
-if (dbDir !== '.' && !fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-const db = new Database(DATABASE_PATH);
+// Initialize Supabase Client
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Create table if not exists
-db.exec(`
-  CREATE TABLE IF NOT EXISTS submissions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL,
-    job_circular TEXT NOT NULL,
-    cv_text TEXT NOT NULL,
-    trx_id TEXT NOT NULL UNIQUE,
-    status TEXT DEFAULT 'Pending Verification',
-    results TEXT
-  )
-`);
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment variables');
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+console.log('✓ Supabase client initialized');
 
 // Multer for file uploads (in memory)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -52,7 +43,12 @@ app.post('/api/submit', upload.single('cv'), async (req, res) => {
     }
 
     // Check if TrxID already exists
-    const existing = db.prepare('SELECT id FROM submissions WHERE trx_id = ?').get(trx_id);
+    const { data: existing, error: checkError } = await supabase
+      .from('submissions')
+      .select('id')
+      .eq('trx_id', trx_id)
+      .single();
+
     if (existing) {
       return res.status(400).json({ error: 'Transaction ID already exists' });
     }
@@ -71,9 +67,23 @@ app.post('/api/submit', upload.single('cv'), async (req, res) => {
       return res.status(400).json({ error: `Failed to parse PDF: ${err.message || 'Unknown error'}. Please ensure it is a valid text-based PDF.` });
     }
 
-    // Save to DB
-    const stmt = db.prepare('INSERT INTO submissions (email, job_circular, cv_text, trx_id) VALUES (?, ?, ?, ?)');
-    stmt.run(email, job_circular, cv_text, trx_id);
+    // Save to Supabase
+    const { error: insertError } = await supabase
+      .from('submissions')
+      .insert([
+        {
+          email,
+          job_circular,
+          cv_text,
+          trx_id,
+          status: 'Pending Verification'
+        }
+      ]);
+
+    if (insertError) {
+      console.error('Insert Error:', insertError);
+      return res.status(500).json({ error: 'Failed to save submission' });
+    }
 
     res.json({ success: true, message: 'Submission received. Pending verification.' });
   } catch (error) {
@@ -82,20 +92,34 @@ app.post('/api/submit', upload.single('cv'), async (req, res) => {
   }
 });
 
-app.get('/api/admin/pending', (req, res) => {
+app.get('/api/admin/pending', async (req, res) => {
   try {
-    const pending = db.prepare('SELECT id, email, trx_id, status FROM submissions WHERE status = ?').all('Pending Verification');
-    res.json(pending);
+    const { data: pending, error } = await supabase
+      .from('submissions')
+      .select('id, email, trx_id, status')
+      .eq('status', 'Pending Verification')
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    res.json(pending || []);
   } catch (error) {
+    console.error('Fetch pending error:', error);
     res.status(500).json({ error: 'Failed to fetch pending submissions' });
   }
 });
 
-app.get('/api/admin/approved', (req, res) => {
+app.get('/api/admin/approved', async (req, res) => {
   try {
-    const approved = db.prepare('SELECT id, email, trx_id, status FROM submissions WHERE status != ?').all('Pending Verification');
-    res.json(approved);
+    const { data: approved, error } = await supabase
+      .from('submissions')
+      .select('id, email, trx_id, status')
+      .neq('status', 'Pending Verification')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(approved || []);
   } catch (error) {
+    console.error('Fetch approved error:', error);
     res.status(500).json({ error: 'Failed to fetch approved submissions' });
   }
 });
@@ -106,22 +130,45 @@ app.post('/api/admin/verify', async (req, res) => {
     if (!trx_id) return res.status(400).json({ error: 'TrxID required' });
 
     // Get submission
-    const submission = db.prepare('SELECT * FROM submissions WHERE trx_id = ?').get(trx_id) as any;
-    if (!submission) return res.status(404).json({ error: 'Submission not found' });
-    if (submission.status === 'Verified') return res.status(400).json({ error: 'Already verified' });
+    const { data: submission, error: fetchError } = await supabase
+      .from('submissions')
+      .select('*')
+      .eq('trx_id', trx_id)
+      .single();
+
+    if (fetchError || !submission) {
+      return res.status(404).json({ error: 'Submission not found' });
+    }
+
+    // Check if already verified
+    if (submission.status === 'Verified') {
+      return res.status(400).json({ error: 'Already verified' });
+    }
 
     // Mark as processing
-    db.prepare('UPDATE submissions SET status = ? WHERE trx_id = ?').run('Processing', trx_id);
+    const { error: updateError } = await supabase
+      .from('submissions')
+      .update({ status: 'Processing', updated_at: new Date().toISOString() })
+      .eq('trx_id', trx_id);
 
-    // Trigger ATS Pipeline asynchronously
-    processATS(submission).catch(err => {
-      console.error('ATS Processing Error:', err);
-      db.prepare('UPDATE submissions SET status = ?, results = ? WHERE trx_id = ?').run(
-        'Failed',
-        JSON.stringify({ error: 'Failed during ATS processing' }),
-        trx_id
-      );
-    });
+    if (updateError) throw updateError;
+
+    // Trigger ATS Pipeline asynchronously (fire and forget)
+    (async () => {
+      try {
+        await processATS(submission);
+      } catch (err: any) {
+        console.error('ATS Processing Error:', err);
+        await supabase
+          .from('submissions')
+          .update({
+            status: 'Failed',
+            results: JSON.stringify({ error: 'Failed during ATS processing' }),
+            updated_at: new Date().toISOString()
+          })
+          .eq('trx_id', trx_id);
+      }
+    })();
 
     res.json({ success: true, message: 'Verified and processing started' });
   } catch (error) {
@@ -130,17 +177,25 @@ app.post('/api/admin/verify', async (req, res) => {
   }
 });
 
-app.get('/api/results/:trxId', (req, res) => {
+app.get('/api/results/:trxId', async (req, res) => {
   try {
     const { trxId } = req.params;
-    const submission = db.prepare('SELECT status, results FROM submissions WHERE trx_id = ?').get(trxId) as any;
+    const { data: submission, error } = await supabase
+      .from('submissions')
+      .select('status, results')
+      .eq('trx_id', trxId)
+      .single();
     
-    if (!submission) return res.status(404).json({ error: 'Transaction ID not found' });
+    if (error || !submission) {
+      return res.status(404).json({ error: 'Transaction ID not found' });
+    }
 
     let parsedResults = null;
     if (submission.results) {
       try {
-        parsedResults = JSON.parse(submission.results);
+        parsedResults = typeof submission.results === 'string' 
+          ? JSON.parse(submission.results) 
+          : submission.results;
       } catch {
         parsedResults = { error: 'Stored analysis result is invalid JSON' };
       }
@@ -151,6 +206,7 @@ app.get('/api/results/:trxId', (req, res) => {
       results: parsedResults
     });
   } catch (error) {
+    console.error('Results fetch error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -409,18 +465,28 @@ async function processATS(submission: any) {
 
   const validated = validateATSResultShape(parsed);
   
-  // Update DB
-  db.prepare('UPDATE submissions SET status = ?, results = ? WHERE trx_id = ?').run(
-    'Verified',
-    JSON.stringify(validated),
-    submission.trx_id
-  );
+  // Update Supabase with results
+  const { error: updateError } = await supabase
+    .from('submissions')
+    .update({
+      status: 'Verified',
+      results: JSON.stringify(validated),
+      updated_at: new Date().toISOString()
+    })
+    .eq('trx_id', submission.trx_id);
+
+  if (updateError) {
+    throw new Error(`Failed to update submission: ${updateError.message}`);
+  }
+
+  console.log(`✓ ATS analysis completed for ${submission.trx_id}`);
 }
 
 // Vite middleware setup
 async function startServer() {
   console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
-  console.log(`DATABASE_PATH: ${DATABASE_PATH}`);
+  console.log(`Database: Supabase`);
+  console.log(`Supabase URL: ${SUPABASE_URL}`);
 
   if (process.env.NODE_ENV !== 'production') {
     // Development mode: Use Vite dev server
