@@ -177,6 +177,58 @@ app.post('/api/admin/verify', async (req, res) => {
   }
 });
 
+app.post('/api/admin/retry', async (req, res) => {
+  try {
+    const { trx_id } = req.body;
+    if (!trx_id) return res.status(400).json({ error: 'TrxID required' });
+
+    // Get submission
+    const { data: submission, error: fetchError } = await supabase
+      .from('submissions')
+      .select('*')
+      .eq('trx_id', trx_id)
+      .single();
+
+    if (fetchError || !submission) {
+      return res.status(404).json({ error: 'Submission not found' });
+    }
+
+    if (submission.status !== 'Failed') {
+      return res.status(400).json({ error: `Cannot retry a submission with status "${submission.status}". Only Failed submissions can be retried.` });
+    }
+
+    // Reset status to Processing
+    const { error: updateError } = await supabase
+      .from('submissions')
+      .update({ status: 'Processing', results: null, updated_at: new Date().toISOString() })
+      .eq('trx_id', trx_id);
+
+    if (updateError) throw updateError;
+
+    // Re-trigger ATS Pipeline asynchronously
+    (async () => {
+      try {
+        await processATS(submission);
+      } catch (err: any) {
+        console.error('ATS Retry Processing Error:', err);
+        await supabase
+          .from('submissions')
+          .update({
+            status: 'Failed',
+            results: JSON.stringify({ error: 'Failed during ATS processing on retry' }),
+            updated_at: new Date().toISOString()
+          })
+          .eq('trx_id', trx_id);
+      }
+    })();
+
+    res.json({ success: true, message: 'Retry started — ATS processing in progress.' });
+  } catch (error) {
+    console.error('Retry Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/api/results/:trxId', async (req, res) => {
   try {
     const { trxId } = req.params;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, CheckCircle2, Clock, AlertCircle, BadgeCheck } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, Clock, AlertCircle, BadgeCheck, RefreshCw } from 'lucide-react';
 
 export default function AdminDashboard() {
   const [password, setPassword] = useState('');
@@ -35,6 +35,22 @@ export default function AdminDashboard() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRetry = async (trxId: string) => {
+    setError('');
+    try {
+      const res = await fetch('/api/admin/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trx_id: trxId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      fetchPending();
+    } catch (err: any) {
+      setError(err.message);
     }
   };
 
@@ -160,15 +176,32 @@ export default function AdminDashboard() {
               <div key={item.id} className="p-6 flex items-center justify-between hover:bg-slate-50 transition-colors">
                 <div>
                   <div className="flex items-center gap-3 mb-1">
-                    <span className="font-mono bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-sm font-medium">
+                    <span className={`font-mono px-2 py-0.5 rounded text-sm font-medium ${
+                      item.status === 'Failed' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                    }`}>
                       {item.trx_id}
                     </span>
-                    <span className="flex items-center gap-1 text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                      <CheckCircle2 className="w-3 h-3" /> {item.status}
+                    <span className={`flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+                      item.status === 'Failed'
+                        ? 'text-red-600 bg-red-50'
+                        : 'text-emerald-600 bg-emerald-50'
+                    }`}>
+                      {item.status === 'Failed'
+                        ? <AlertCircle className="w-3 h-3" />
+                        : <CheckCircle2 className="w-3 h-3" />}
+                      {item.status}
                     </span>
                   </div>
                   <p className="text-sm text-slate-600">{item.email}</p>
                 </div>
+                {item.status === 'Failed' && (
+                  <button
+                    onClick={() => handleRetry(item.trx_id)}
+                    className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" /> Retry
+                  </button>
+                )}
               </div>
             ))}
           </div>
