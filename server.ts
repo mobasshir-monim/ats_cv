@@ -343,6 +343,18 @@ function validateATSResultShape(parsed: any) {
     }
   }
 
+  // Validate generalAdvice if present
+  if (parsed.generalAdvice) {
+    if (!Array.isArray(parsed.generalAdvice)) {
+      throw new Error('Invalid generalAdvice - must be an array');
+    }
+    for (const advice of parsed.generalAdvice) {
+      if (typeof advice !== 'string') {
+        throw new Error('Invalid generalAdvice item - must be string');
+      }
+    }
+  }
+
   return parsed;
 }
 
@@ -400,6 +412,7 @@ async function processATS(submission: any) {
     4. Calculate an overall ATS Match Score (0-100) based on how well the CV matches the circular.
     5. Check if the CV contains the following standard sections: Summary/Introduction, Education, Experience, Extra Curricular Activities, Skills, Achievements, References. Identify any missing sections. If NONE of these sections are present, the CV is invalid.
     6. Generate section-specific "Done-For-You" rewrites. For each CV section that needs improvement, provide 1-2 rewritten bullet points that better match the job circular using strong action verbs and quantifiable metrics. Include these sections where applicable: Professional Summary, Skills, Experience, Education, Certifications.
+    7. Provide 4-6 practical general CV improvement tips tailored to this candidate.
 
     Return the result strictly as a JSON object with this structure:
     {
@@ -413,6 +426,7 @@ async function processATS(submission: any) {
         }
       ],
       "missingCVSections": ["<section name>", "<section name>"],
+      "generalAdvice": ["<advice 1>", "<advice 2>", "<advice 3>"],
       "sectionRewrites": {
         "professionalSummary": {
           "section": "Professional Summary",
@@ -453,6 +467,7 @@ async function processATS(submission: any) {
     4. Based on the skills and experience identified, suggest 3-5 suitable job roles/positions that would be a good fit.
     5. Check if the CV contains the following standard sections: Summary/Introduction, Education, Experience, Extra Curricular Activities, Skills, Achievements, References. Identify any missing sections. If NONE of these sections are present, the CV is invalid.
     6. Generate section-specific "Done-For-You" rewrites that enhance the CV's overall appeal. For each CV section, provide 1-2 rewritten bullet points highlighting achievements with strong action verbs and quantifiable metrics. Include these sections where applicable: Professional Summary, Skills, Experience, Education, Certifications.
+    7. Provide 4-6 practical general CV improvement tips tailored to this candidate.
 
     Return the result strictly as a JSON object with this structure:
     {
@@ -466,6 +481,7 @@ async function processATS(submission: any) {
         }
       ],
       "missingCVSections": ["<section name>", "<section name>"],
+      "generalAdvice": ["<advice 1>", "<advice 2>", "<advice 3>"],
       "suggestedJobs": [
         {
           "jobTitle": "<job title>",

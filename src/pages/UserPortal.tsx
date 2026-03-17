@@ -141,7 +141,7 @@ export default function UserPortal() {
               </div>
             </div>
             <ul className="text-sm text-slate-600 space-y-2 list-disc list-inside">
-              <li>Send Money: <strong>15 BDT</strong></li>
+              <li>Send Money: <strong>20 BDT</strong></li>
               <li>Save the Transaction ID (TrxID)</li>
               <li>Enter it in the form to verify</li>
             </ul>

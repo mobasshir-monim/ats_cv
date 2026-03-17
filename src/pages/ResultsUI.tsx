@@ -69,6 +69,8 @@ export default function ResultsUI() {
     };
   }, [activeTrxId, data?.status]);
 
+  const isNoCircularSubmission = Boolean(data?.results?.suggestedJobs);
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="text-center mb-10">
@@ -195,13 +197,17 @@ export default function ResultsUI() {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100 bg-slate-50">
               <h3 className="font-semibold text-slate-800 text-lg">Knockout Criteria Check</h3>
-              <p className="text-sm text-slate-500 mt-1">Hard requirements extracted from the job circular.</p>
+              <p className="text-sm text-slate-500 mt-1">
+                {isNoCircularSubmission
+                  ? 'These points set your CV apart and make it extraordinary.'
+                  : 'Hard requirements extracted from the job circular.'}
+              </p>
             </div>
             <div className="divide-y divide-slate-100">
               {data.results.knockoutCriteria.map((item: any, i: number) => (
                 <div key={i} className="p-6 flex gap-4">
                   <div className="shrink-0 mt-1">
-                    {item.status.toLowerCase() === 'pass' ? (
+                    {isNoCircularSubmission || item.status.toLowerCase() === 'pass' ? (
                       <CheckCircle2 className="w-6 h-6 text-emerald-500" />
                     ) : (
                       <XCircle className="w-6 h-6 text-red-500" />
@@ -345,6 +351,26 @@ export default function ResultsUI() {
               ) : null}
             </div>
           </div>
+
+          {/* General Advice */}
+          {Array.isArray(data.results.generalAdvice) && data.results.generalAdvice.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-semibold text-slate-800 text-lg">General Advice</h3>
+                <p className="text-sm text-slate-500 mt-1">AI-generated recommendations tailored to improve your CV.</p>
+              </div>
+              <div className="p-6">
+                <ul className="space-y-3 text-slate-700">
+                  {data.results.generalAdvice.map((advice: string, i: number) => (
+                    <li key={i} className="flex gap-3 items-start">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{advice}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
     </div>
