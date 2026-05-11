@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import multer from 'multer';
 import { extractText } from 'unpdf';
-import { createClient } from '@supabase/supabase-js';
+import { Pool } from 'pg';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import fs from 'fs';
@@ -11,17 +11,22 @@ import 'dotenv/config';
 const app = express();
 const PORT = 3000;
 
-// Initialize Supabase Client
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Initialize Neon PostgreSQL Pool
+const DATABASE_URL = process.env.DATABASE_URL;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment variables');
+if (!DATABASE_URL) {
+  throw new Error('Missing DATABASE_URL in environment variables');
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+});
 
-console.log('✓ Supabase client initialized');
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+});
+
+console.log('✓ Neon PostgreSQL client initialized');
 
 // Multer for file uploads (in memory)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -43,13 +48,12 @@ app.post('/api/submit', upload.single('cv'), async (req, res) => {
     }
 
     // Check if TrxID already exists
-    const { data: existing, error: checkError } = await supabase
-      .from('submissions')
-      .select('id')
-      .eq('trx_id', trx_id)
-      .single();
+    const existingResult = await pool.query(
+      'SELECT id FROM submissions WHERE trx_id = $1',
+      [trx_id]
+    );
 
-    if (existing) {
+    if (existingResult.rows.length > 0) {
       return res.status(400).json({ error: 'Transaction ID already exists' });
     }
 
@@ -67,20 +71,13 @@ app.post('/api/submit', upload.single('cv'), async (req, res) => {
       return res.status(400).json({ error: `Failed to parse PDF: ${err.message || 'Unknown error'}. Please ensure it is a valid text-based PDF.` });
     }
 
-    // Save to Supabase
-    const { error: insertError } = await supabase
-      .from('submissions')
-      .insert([
-        {
-          email,
-          job_circular,
-          cv_text,
-          trx_id,
-          status: 'Pending Verification'
-        }
-      ]);
-
-    if (insertError) {
+    // Save to Neon
+    try {
+      await pool.query(
+        'INSERT INTO submissions (email, job_circular, cv_text, trx_id, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())',
+        [email, job_circular, cv_text, trx_id, 'Pending Verification']
+      );
+    } catch (insertError: any) {
       console.error('Insert Error:', insertError);
       return res.status(500).json({ error: 'Failed to save submission' });
     }
@@ -94,14 +91,11 @@ app.post('/api/submit', upload.single('cv'), async (req, res) => {
 
 app.get('/api/admin/pending', async (req, res) => {
   try {
-    const { data: pending, error } = await supabase
-      .from('submissions')
-      .select('id, email, trx_id, status')
-      .eq('status', 'Pending Verification')
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
-    res.json(pending || []);
+    const result = await pool.query(
+      'SELECT id, email, trx_id, status FROM submissions WHERE status = $1 ORDER BY created_at ASC',
+      ['Pending Verification']
+    );
+    res.json(result.rows || []);
   } catch (error) {
     console.error('Fetch pending error:', error);
     res.status(500).json({ error: 'Failed to fetch pending submissions' });
@@ -110,14 +104,11 @@ app.get('/api/admin/pending', async (req, res) => {
 
 app.get('/api/admin/approved', async (req, res) => {
   try {
-    const { data: approved, error } = await supabase
-      .from('submissions')
-      .select('id, email, trx_id, status')
-      .neq('status', 'Pending Verification')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    res.json(approved || []);
+    const result = await pool.query(
+      'SELECT id, email, trx_id, status FROM submissions WHERE status != $1 ORDER BY created_at DESC',
+      ['Pending Verification']
+    );
+    res.json(result.rows || []);
   } catch (error) {
     console.error('Fetch approved error:', error);
     res.status(500).json({ error: 'Failed to fetch approved submissions' });
@@ -130,15 +121,16 @@ app.post('/api/admin/verify', async (req, res) => {
     if (!trx_id) return res.status(400).json({ error: 'TrxID required' });
 
     // Get submission
-    const { data: submission, error: fetchError } = await supabase
-      .from('submissions')
-      .select('*')
-      .eq('trx_id', trx_id)
-      .single();
+    const submissionResult = await pool.query(
+      'SELECT * FROM submissions WHERE trx_id = $1',
+      [trx_id]
+    );
 
-    if (fetchError || !submission) {
+    if (submissionResult.rows.length === 0) {
       return res.status(404).json({ error: 'Submission not found' });
     }
+
+    const submission = submissionResult.rows[0];
 
     // Check if already verified
     if (submission.status === 'Verified') {
@@ -146,12 +138,14 @@ app.post('/api/admin/verify', async (req, res) => {
     }
 
     // Mark as processing
-    const { error: updateError } = await supabase
-      .from('submissions')
-      .update({ status: 'Processing', updated_at: new Date().toISOString() })
-      .eq('trx_id', trx_id);
-
-    if (updateError) throw updateError;
+    try {
+      await pool.query(
+        'UPDATE submissions SET status = $1, updated_at = NOW() WHERE trx_id = $2',
+        ['Processing', trx_id]
+      );
+    } catch (updateError: any) {
+      throw updateError;
+    }
 
     // Trigger ATS Pipeline asynchronously (fire and forget)
     (async () => {
@@ -159,14 +153,10 @@ app.post('/api/admin/verify', async (req, res) => {
         await processATS(submission);
       } catch (err: any) {
         console.error('ATS Processing Error:', err);
-        await supabase
-          .from('submissions')
-          .update({
-            status: 'Failed',
-            results: JSON.stringify({ error: 'Failed during ATS processing' }),
-            updated_at: new Date().toISOString()
-          })
-          .eq('trx_id', trx_id);
+        await pool.query(
+          'UPDATE submissions SET status = $1, results = $2, updated_at = NOW() WHERE trx_id = $3',
+          ['Failed', JSON.stringify({ error: 'Failed during ATS processing' }), trx_id]
+        );
       }
     })();
 
@@ -183,27 +173,30 @@ app.post('/api/admin/retry', async (req, res) => {
     if (!trx_id) return res.status(400).json({ error: 'TrxID required' });
 
     // Get submission
-    const { data: submission, error: fetchError } = await supabase
-      .from('submissions')
-      .select('*')
-      .eq('trx_id', trx_id)
-      .single();
+    const submissionResult = await pool.query(
+      'SELECT * FROM submissions WHERE trx_id = $1',
+      [trx_id]
+    );
 
-    if (fetchError || !submission) {
+    if (submissionResult.rows.length === 0) {
       return res.status(404).json({ error: 'Submission not found' });
     }
+
+    const submission = submissionResult.rows[0];
 
     if (submission.status !== 'Failed') {
       return res.status(400).json({ error: `Cannot retry a submission with status "${submission.status}". Only Failed submissions can be retried.` });
     }
 
     // Reset status to Processing
-    const { error: updateError } = await supabase
-      .from('submissions')
-      .update({ status: 'Processing', results: null, updated_at: new Date().toISOString() })
-      .eq('trx_id', trx_id);
-
-    if (updateError) throw updateError;
+    try {
+      await pool.query(
+        'UPDATE submissions SET status = $1, results = NULL, updated_at = NOW() WHERE trx_id = $2',
+        ['Processing', trx_id]
+      );
+    } catch (updateError: any) {
+      throw updateError;
+    }
 
     // Re-trigger ATS Pipeline asynchronously
     (async () => {
@@ -211,14 +204,10 @@ app.post('/api/admin/retry', async (req, res) => {
         await processATS(submission);
       } catch (err: any) {
         console.error('ATS Retry Processing Error:', err);
-        await supabase
-          .from('submissions')
-          .update({
-            status: 'Failed',
-            results: JSON.stringify({ error: 'Failed during ATS processing on retry' }),
-            updated_at: new Date().toISOString()
-          })
-          .eq('trx_id', trx_id);
+        await pool.query(
+          'UPDATE submissions SET status = $1, results = $2, updated_at = NOW() WHERE trx_id = $3',
+          ['Failed', JSON.stringify({ error: 'Failed during ATS processing on retry' }), trx_id]
+        );
       }
     })();
 
@@ -232,16 +221,16 @@ app.post('/api/admin/retry', async (req, res) => {
 app.get('/api/results/:trxId', async (req, res) => {
   try {
     const { trxId } = req.params;
-    const { data: submission, error } = await supabase
-      .from('submissions')
-      .select('status, results')
-      .eq('trx_id', trxId)
-      .single();
+    const result = await pool.query(
+      'SELECT status, results FROM submissions WHERE trx_id = $1',
+      [trxId]
+    );
     
-    if (error || !submission) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction ID not found' });
     }
 
+    const submission = result.rows[0];
     let parsedResults = null;
     if (submission.results) {
       try {
@@ -533,17 +522,13 @@ async function processATS(submission: any) {
 
   const validated = validateATSResultShape(parsed);
   
-  // Update Supabase with results
-  const { error: updateError } = await supabase
-    .from('submissions')
-    .update({
-      status: 'Verified',
-      results: JSON.stringify(validated),
-      updated_at: new Date().toISOString()
-    })
-    .eq('trx_id', submission.trx_id);
-
-  if (updateError) {
+  // Update Neon with results
+  try {
+    await pool.query(
+      'UPDATE submissions SET status = $1, results = $2, updated_at = NOW() WHERE trx_id = $3',
+      ['Verified', JSON.stringify(validated), submission.trx_id]
+    );
+  } catch (updateError: any) {
     throw new Error(`Failed to update submission: ${updateError.message}`);
   }
 
@@ -553,8 +538,7 @@ async function processATS(submission: any) {
 // Vite middleware setup
 async function startServer() {
   console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
-  console.log(`Database: Supabase`);
-  console.log(`Supabase URL: ${SUPABASE_URL}`);
+  console.log(`Database: Neon PostgreSQL`);
 
   if (process.env.NODE_ENV !== 'production') {
     // Development mode: Use Vite dev server
